@@ -9,6 +9,8 @@ import authRoutes from './routes/auth.js';
 import transactionsRoutes from './routes/transactions.js';
 import dashboardRoutes from './routes/dashboard.js';
 import webhooksRoutes from './routes/webhooks.js';
+import goalsRoutes from './routes/goals.js';
+import categoriesRoutes from './routes/categories.js';
 
 const app = express();
 
@@ -70,6 +72,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/transactions', transactionsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/webhooks', webhooksRoutes);
+app.use('/api/goals', goalsRoutes);
+app.use('/api/categories', categoriesRoutes);
 
 // =============================================================================
 // MANEJO DE ERRORES

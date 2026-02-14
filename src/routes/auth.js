@@ -57,6 +57,8 @@ router.post(
         });
       }
 
+      // Si no hay session, significa que requiere confirmación de email
+      const requiresEmailConfirmation = data.session === null;
       return success(res, {
         message: 'Usuario registrado exitosamente',
         user: {
@@ -65,6 +67,7 @@ router.post(
           name: name,
         },
         // El usuario necesita activar suscripción
+        requiresEmailConfirmation,
         requiresSubscription: true,
       }, 201);
     } catch (err) {
@@ -248,6 +251,95 @@ router.post('/refresh', async (req, res) => {
     });
   } catch (err) {
     console.error('Refresh error:', err);
+    return sendError(res, 'INTERNAL_ERROR');
+  }
+});
+
+
+/**
+ * PUT /auth/profile
+ * Actualizar perfil del usuario
+ */
+router.put('/profile', authenticate, async (req, res) => {
+  try {
+    const { name } = req.body;
+    const userId = req.user.id;
+
+    if (!name || !name.trim()) {
+      return sendError(res, 'VALIDATION_ERROR', 'El nombre es requerido');
+    }
+
+    // Actualizar en tabla profiles
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .upsert({ id: userId, full_name: name.trim(), updated_at: new Date().toISOString() })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Update profile error:', error);
+      return sendError(res, 'INTERNAL_ERROR', 'Error al actualizar perfil');
+    }
+
+    // Actualizar metadata en Supabase Auth
+    await supabaseAdmin.auth.admin.updateUserById(userId, {
+      user_metadata: { full_name: name.trim() }
+    });
+
+    return success(res, {
+      message: 'Perfil actualizado correctamente',
+      user: {
+        id: userId,
+        email: req.user.email,
+        name: data.full_name,
+      }
+    });
+  } catch (err) {
+    console.error('Update profile error:', err);
+    return sendError(res, 'INTERNAL_ERROR');
+  }
+});
+
+/**
+ * PUT /auth/password
+ * Cambiar contraseña
+ */
+router.put('/password', authenticate, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.id;
+
+    if (!currentPassword || !newPassword) {
+      return sendError(res, 'VALIDATION_ERROR', 'Contraseña actual y nueva son requeridas');
+    }
+
+    if (newPassword.length < 8) {
+      return sendError(res, 'VALIDATION_ERROR', 'La nueva contraseña debe tener al menos 8 caracteres');
+    }
+
+    // Verificar contraseña actual intentando login
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: req.user.email,
+      password: currentPassword,
+    });
+
+    if (verifyError) {
+      return sendError(res, 'INVALID_CREDENTIALS', 'La contraseña actual es incorrecta');
+    }
+
+    // Actualizar contraseña
+    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      password: newPassword
+    });
+
+    if (updateError) {
+      console.error('Update password error:', updateError);
+      return sendError(res, 'INTERNAL_ERROR', 'Error al cambiar contraseña');
+    }
+
+    return success(res, { message: 'Contraseña actualizada correctamente' });
+  } catch (err) {
+    console.error('Update password error:', err);
     return sendError(res, 'INTERNAL_ERROR');
   }
 });
