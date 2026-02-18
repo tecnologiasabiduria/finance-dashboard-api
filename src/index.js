@@ -11,6 +11,7 @@ import dashboardRoutes from './routes/dashboard.js';
 import webhooksRoutes from './routes/webhooks.js';
 import goalsRoutes from './routes/goals.js';
 import categoriesRoutes from './routes/categories.js';
+import notificationsRoutes from './routes/notifications.js';
 
 const app = express();
 
@@ -74,6 +75,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/goals', goalsRoutes);
 app.use('/api/categories', categoriesRoutes);
+app.use('/api/notifications', notificationsRoutes);
 
 // =============================================================================
 // MANEJO DE ERRORES

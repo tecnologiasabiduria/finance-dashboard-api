@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { supabase, supabaseAdmin } from '../config/supabase.js';
+import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate } from '../middlewares/auth.js';
 import { success, sendError } from '../utils/response.js';
 
@@ -30,7 +30,7 @@ router.use(authenticate);
 // Obtener todas las categorías del usuario
 router.get('/', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('categories')
       .select('*')
       .eq('user_id', req.user.id)
@@ -39,25 +39,11 @@ router.get('/', async (req, res) => {
 
     if (error) throw error;
 
-    // Si no tiene categorías, devolver las por defecto
+    // Si no tiene categorías, devolver listas vacías
     if (!data || data.length === 0) {
-      const defaultData = {
-        income: DEFAULT_CATEGORIES.income.map((c, i) => ({
-          id: `default-income-${i}`,
-          ...c,
-          type: 'income',
-          is_default: true,
-        })),
-        expense: DEFAULT_CATEGORIES.expense.map((c, i) => ({
-          id: `default-expense-${i}`,
-          ...c,
-          type: 'expense',
-          is_default: true,
-        })),
-      };
       return success(res, { 
-        categories: [...defaultData.income, ...defaultData.expense],
-        grouped: defaultData,
+        categories: [],
+        grouped: { income: [], expense: [] },
         hasCustomCategories: false
       });
     }
@@ -93,7 +79,7 @@ router.post('/', async (req, res) => {
     }
 
     // Verificar que no exista una categoría con el mismo nombre para este usuario
-    const { data: existing } = await supabase
+    const { data: existing } = await supabaseAdmin
       .from('categories')
       .select('id')
       .eq('user_id', req.user.id)
@@ -105,7 +91,7 @@ router.post('/', async (req, res) => {
       return sendError(res, 'VALIDATION_ERROR', 'Ya existe una categoría con ese nombre');
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('categories')
       .insert({
         user_id: req.user.id,
@@ -132,7 +118,7 @@ router.put('/:id', async (req, res) => {
     const { name, icon, color } = req.body;
 
     // Verificar que la categoría pertenece al usuario
-    const { data: existing } = await supabase
+    const { data: existing } = await supabaseAdmin
       .from('categories')
       .select('id')
       .eq('id', req.params.id)
@@ -148,7 +134,7 @@ router.put('/:id', async (req, res) => {
     if (icon !== undefined) updateData.icon = icon;
     if (color !== undefined) updateData.color = color;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('categories')
       .update(updateData)
       .eq('id', req.params.id)
@@ -169,7 +155,7 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     // Verificar que la categoría pertenece al usuario
-    const { data: existing } = await supabase
+    const { data: existing } = await supabaseAdmin
       .from('categories')
       .select('id, name')
       .eq('id', req.params.id)
@@ -181,7 +167,7 @@ router.delete('/:id', async (req, res) => {
     }
 
     // Verificar si hay transacciones usando esta categoría
-    const { count } = await supabase
+    const { count } = await supabaseAdmin
       .from('transactions')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', req.user.id)
@@ -195,7 +181,7 @@ router.delete('/:id', async (req, res) => {
       );
     }
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('categories')
       .delete()
       .eq('id', req.params.id)
@@ -214,7 +200,7 @@ router.delete('/:id', async (req, res) => {
 router.post('/init', async (req, res) => {
   try {
     // Verificar si ya tiene categorías
-    const { count } = await supabase
+    const { count } = await supabaseAdmin
       .from('categories')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', req.user.id);
@@ -229,7 +215,7 @@ router.post('/init', async (req, res) => {
       ...DEFAULT_CATEGORIES.expense.map(c => ({ ...c, type: 'expense', user_id: req.user.id })),
     ];
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('categories')
       .insert(categoriesToInsert)
       .select();
