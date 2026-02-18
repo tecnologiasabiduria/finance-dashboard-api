@@ -6,8 +6,35 @@ import { supabaseAdmin } from '../config/supabase.js';
 export const subscriptionService = {
   /**
    * Obtener suscripción activa de un usuario
+   * 
+   * Primero verifica profiles.subscription_status (fuente de verdad del webhook GHL)
+   * Si no, busca en tabla subscriptions (legacy / Stripe directo)
    */
   async getActive(userId) {
+    // 1. Verificar en profiles.subscription_status (webhook GHL pone 'active' aquí)
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, email, subscription_status')
+      .eq('id', userId)
+      .single();
+
+    if (profileError && profileError.code !== 'PGRST116') {
+      console.error('Error checking profile subscription:', profileError);
+    }
+
+    if (profile?.subscription_status === 'active') {
+      // Retornar un objeto con formato compatible
+      return {
+        id: `profile-${profile.id}`,
+        user_id: userId,
+        status: 'active',
+        provider: 'ghl_webhook',
+        current_period_start: null,
+        current_period_end: null,
+      };
+    }
+
+    // 2. Fallback: buscar en tabla subscriptions (Stripe directo)
     const { data, error } = await supabaseAdmin
       .from('subscriptions')
       .select('*')

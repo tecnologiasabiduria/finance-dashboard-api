@@ -16,7 +16,27 @@ export async function requireSubscription(req, res, next) {
 
     const userId = req.user.id;
 
-    // Buscar suscripción activa del usuario
+    // 1. Verificar en profiles.subscription_status (fuente de verdad del webhook GHL)
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, subscription_status')
+      .eq('id', userId)
+      .single();
+
+    if (profileError && profileError.code !== 'PGRST116') {
+      console.error('Profile subscription check error:', profileError);
+    }
+
+    if (profile?.subscription_status === 'active') {
+      req.subscription = {
+        id: `profile-${profile.id}`,
+        status: 'active',
+        provider: 'ghl_webhook',
+      };
+      return next();
+    }
+
+    // 2. Fallback: buscar en tabla subscriptions (Stripe directo)
     const { data: subscription, error } = await supabaseAdmin
       .from('subscriptions')
       .select('*')
@@ -25,7 +45,6 @@ export async function requireSubscription(req, res, next) {
       .single();
 
     if (error && error.code !== 'PGRST116') {
-      // PGRST116 = no rows found, otros errores son reales
       console.error('Subscription check error:', error);
       return sendError(res, 'INTERNAL_ERROR', 'Error al verificar suscripción');
     }
