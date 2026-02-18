@@ -129,18 +129,45 @@ router.post(
   async (req, res) => {
     try {
       const userId = req.user.id;
-      const { type, amount, category, description, date } = req.body;
+      const {
+        type, amount, category, description, date,
+        // Campos de ingreso (datos del cliente)
+        invoice_number, client_document, client_name,
+        client_address, client_email, client_phone, invoice_status,
+        // Campos de gasto (datos del proveedor)
+        provider_document, provider_name, payment_method,
+      } = req.body;
+
+      const insertData = {
+        user_id: userId,
+        type,
+        amount: parseFloat(amount),
+        category: category || null,
+        description: description || null,
+        date,
+      };
+
+      // Campos de ingreso
+      if (type === 'income') {
+        if (invoice_number !== undefined) insertData.invoice_number = invoice_number || null;
+        if (client_document !== undefined) insertData.client_document = client_document || null;
+        if (client_name !== undefined) insertData.client_name = client_name || null;
+        if (client_address !== undefined) insertData.client_address = client_address || null;
+        if (client_email !== undefined) insertData.client_email = client_email || null;
+        if (client_phone !== undefined) insertData.client_phone = client_phone || null;
+        if (invoice_status !== undefined) insertData.invoice_status = invoice_status || null;
+      }
+
+      // Campos de gasto
+      if (type === 'expense') {
+        if (provider_document !== undefined) insertData.provider_document = provider_document || null;
+        if (provider_name !== undefined) insertData.provider_name = provider_name || null;
+        if (payment_method !== undefined) insertData.payment_method = payment_method || null;
+      }
 
       const { data, error } = await supabaseAdmin
         .from('transactions')
-        .insert({
-          user_id: userId,
-          type,
-          amount: parseFloat(amount),
-          category: category || null,
-          description: description || null,
-          date,
-        })
+        .insert(insertData)
         .select()
         .single();
 
@@ -168,7 +195,12 @@ router.put(
     try {
       const userId = req.user.id;
       const { id } = req.params;
-      const { type, amount, category, description, date } = req.body;
+      const {
+        type, amount, category, description, date,
+        invoice_number, client_document, client_name,
+        client_address, client_email, client_phone, invoice_status,
+        provider_document, provider_name, payment_method,
+      } = req.body;
 
       // Verificar que existe y pertenece al usuario
       const { data: existing } = await supabaseAdmin
@@ -189,6 +221,20 @@ router.put(
       if (category !== undefined) updateData.category = category;
       if (description !== undefined) updateData.description = description;
       if (date) updateData.date = date;
+
+      // Campos de ingreso
+      if (invoice_number !== undefined) updateData.invoice_number = invoice_number || null;
+      if (client_document !== undefined) updateData.client_document = client_document || null;
+      if (client_name !== undefined) updateData.client_name = client_name || null;
+      if (client_address !== undefined) updateData.client_address = client_address || null;
+      if (client_email !== undefined) updateData.client_email = client_email || null;
+      if (client_phone !== undefined) updateData.client_phone = client_phone || null;
+      if (invoice_status !== undefined) updateData.invoice_status = invoice_status || null;
+
+      // Campos de gasto
+      if (provider_document !== undefined) updateData.provider_document = provider_document || null;
+      if (provider_name !== undefined) updateData.provider_name = provider_name || null;
+      if (payment_method !== undefined) updateData.payment_method = payment_method || null;
 
       if (Object.keys(updateData).length === 0) {
         return sendError(res, 'VALIDATION_ERROR', 'No hay datos para actualizar');
