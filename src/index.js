@@ -12,6 +12,7 @@ import webhooksRoutes from './routes/webhooks.js';
 import goalsRoutes from './routes/goals.js';
 import categoriesRoutes from './routes/categories.js';
 import notificationsRoutes from './routes/notifications.js';
+import budgetRoutes from './routes/budget.js';
 
 const app = express();
 
@@ -76,6 +77,7 @@ app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/goals', goalsRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/budget', budgetRoutes);
 
 // =============================================================================
 // MANEJO DE ERRORES
