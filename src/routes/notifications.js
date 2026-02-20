@@ -190,8 +190,10 @@ router.put('/read-all', authenticate, async (req, res) => {
  */
 router.post('/webhook/ghl', async (req, res) => {
   try {
-    // 1. Verificar secret
-    const secret = req.headers['x-webhook-secret'] || req.headers['x-ghl-signature'];
+    // 1. Verificar secret (acepta header O query parameter)
+    const secret = req.headers['x-webhook-secret'] 
+      || req.headers['x-ghl-signature'] 
+      || req.query.secret;
 
     if (!config.isDev && config.ghl.webhookSecret) {
       if (secret !== config.ghl.webhookSecret) {
