@@ -11,6 +11,7 @@ import dashboardRoutes from './routes/dashboard.js';
 import webhooksRoutes from './routes/webhooks.js';
 import goalsRoutes from './routes/goals.js';
 import categoriesRoutes from './routes/categories.js';
+import subcategoriesRoutes from './routes/subcategories.js';
 import notificationsRoutes from './routes/notifications.js';
 import budgetRoutes from './routes/budget.js';
 
@@ -76,6 +77,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/goals', goalsRoutes);
 app.use('/api/categories', categoriesRoutes);
+app.use('/api/subcategories', subcategoriesRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/budget', budgetRoutes);
 

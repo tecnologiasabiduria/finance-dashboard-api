@@ -48,14 +48,27 @@ router.get('/', async (req, res) => {
       });
     }
 
+    // Obtener subcategorías del usuario
+    const { data: subs } = await supabaseAdmin
+      .from('subcategories')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .order('name');
+
+    // Anidar subcategorías en cada categoría
+    const categoriesWithSubs = data.map(cat => ({
+      ...cat,
+      subcategories: (subs || []).filter(s => s.category_id === cat.id)
+    }));
+
     // Agrupar por tipo
     const grouped = {
-      income: data.filter(c => c.type === 'income'),
-      expense: data.filter(c => c.type === 'expense'),
+      income: categoriesWithSubs.filter(c => c.type === 'income'),
+      expense: categoriesWithSubs.filter(c => c.type === 'expense'),
     };
 
     success(res, { 
-      categories: data, 
+      categories: categoriesWithSubs, 
       grouped,
       hasCustomCategories: true 
     });

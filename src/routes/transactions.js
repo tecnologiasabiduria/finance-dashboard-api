@@ -36,7 +36,7 @@ router.get('/', async (req, res) => {
       .eq('user_id', userId);
 
     // Filtros
-    if (type && ['income', 'expense'].includes(type)) {
+    if (type && ['income', 'expense', 'transfer'].includes(type)) {
       query = query.eq('type', type);
     }
 
@@ -120,7 +120,7 @@ router.get('/:id', validateUUID('id'), async (req, res) => {
 router.post(
   '/',
   validateBody([
-    { name: 'type', options: ['income', 'expense'] },
+    { name: 'type', options: ['income', 'expense', 'transfer'] },
     { name: 'amount', type: 'number', min: 0.01 },
     'date',
     { name: 'category', required: false },
@@ -136,6 +136,8 @@ router.post(
         client_address, client_email, client_phone, invoice_status,
         // Campos de gasto (datos del proveedor)
         provider_document, provider_name, payment_method,
+        // Campos de transferencia
+        source_account, destination_account,
       } = req.body;
 
       const insertData = {
@@ -163,6 +165,12 @@ router.post(
         if (provider_document !== undefined) insertData.provider_document = provider_document || null;
         if (provider_name !== undefined) insertData.provider_name = provider_name || null;
         if (payment_method !== undefined) insertData.payment_method = payment_method || null;
+      }
+
+      // Campos de transferencia
+      if (type === 'transfer') {
+        if (source_account !== undefined) insertData.source_account = source_account || null;
+        if (destination_account !== undefined) insertData.destination_account = destination_account || null;
       }
 
       const { data, error } = await supabaseAdmin
@@ -200,6 +208,7 @@ router.put(
         invoice_number, client_document, client_name,
         client_address, client_email, client_phone, invoice_status,
         provider_document, provider_name, payment_method,
+        source_account, destination_account,
       } = req.body;
 
       // Verificar que existe y pertenece al usuario
@@ -216,7 +225,7 @@ router.put(
 
       // Preparar datos de actualización
       const updateData = {};
-      if (type && ['income', 'expense'].includes(type)) updateData.type = type;
+      if (type && ['income', 'expense', 'transfer'].includes(type)) updateData.type = type;
       if (amount !== undefined) updateData.amount = parseFloat(amount);
       if (category !== undefined) updateData.category = category;
       if (description !== undefined) updateData.description = description;
@@ -235,6 +244,10 @@ router.put(
       if (provider_document !== undefined) updateData.provider_document = provider_document || null;
       if (provider_name !== undefined) updateData.provider_name = provider_name || null;
       if (payment_method !== undefined) updateData.payment_method = payment_method || null;
+
+      // Campos de transferencia
+      if (source_account !== undefined) updateData.source_account = source_account || null;
+      if (destination_account !== undefined) updateData.destination_account = destination_account || null;
 
       if (Object.keys(updateData).length === 0) {
         return sendError(res, 'VALIDATION_ERROR', 'No hay datos para actualizar');
