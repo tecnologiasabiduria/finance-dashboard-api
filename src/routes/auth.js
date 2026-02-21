@@ -257,6 +257,43 @@ router.post('/refresh', async (req, res) => {
 
 
 /**
+ * POST /auth/forgot-password
+ * Enviar email de recuperación de contraseña
+ */
+router.post(
+  '/forgot-password',
+  validateBody(['email']),
+  async (req, res) => {
+    try {
+      const { email } = req.body;
+
+      const redirectTo = `${config.frontendUrl}/auth/callback`;
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo,
+      });
+
+      if (error) {
+        console.error('Forgot password error:', error);
+
+        if (error.message.includes('rate limit') || error.code === 'over_email_send_rate_limit') {
+          return sendError(res, 'RATE_LIMIT', 'Demasiados intentos. Espera unos minutos e intenta de nuevo.');
+        }
+
+        return sendError(res, 'INTERNAL_ERROR', 'Error al enviar el email de recuperación');
+      }
+
+      return success(res, {
+        message: 'Si el email está registrado, recibirás un enlace para restablecer tu contraseña.',
+      });
+    } catch (err) {
+      console.error('Forgot password error:', err);
+      return sendError(res, 'INTERNAL_ERROR');
+    }
+  }
+);
+
+/**
  * PUT /auth/profile
  * Actualizar perfil del usuario
  */
