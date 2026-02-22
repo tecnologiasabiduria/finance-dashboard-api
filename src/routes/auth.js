@@ -5,6 +5,7 @@ import { authenticate } from '../middlewares/auth.js';
 import { validateBody } from '../middlewares/validate.js';
 import { subscriptionService } from '../services/subscription.js';
 import { config } from '../config/env.js';
+import { initDefaultCategories } from './categories.js';
 
 const router = Router();
 
@@ -55,6 +56,13 @@ router.post(
           email: data.user.email,
           full_name: name,
         });
+
+        // Inicializar categorías y subcategorías por defecto (solo se ejecuta una vez)
+        try {
+          await initDefaultCategories(data.user.id);
+        } catch (catErr) {
+          console.error('Error initializing default categories for new user:', catErr);
+        }
       }
 
       // Si no hay session, significa que requiere confirmación de email

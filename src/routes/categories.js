@@ -5,24 +5,77 @@ import { success, sendError } from '../utils/response.js';
 
 const router = Router();
 
-// Categorías por defecto (para usuarios nuevos o modo demo)
+// Categorías por defecto para perfil empresarial colombiano
 const DEFAULT_CATEGORIES = {
   income: [
-    { name: 'Salario', icon: 'briefcase', color: '#22C55E' },
-    { name: 'Freelance', icon: 'laptop', color: '#10B981' },
-    { name: 'Inversiones', icon: 'trending-up', color: '#059669' },
-    { name: 'Otros Ingresos', icon: 'plus-circle', color: '#047857' },
+    { name: 'Ventas', icon: 'shopping-cart', color: '#22C55E', subcategories: ['Ventas de Contado', 'Ventas a Crédito', 'Ventas por Mayor'] },
+    { name: 'Servicios Prestados', icon: 'briefcase', color: '#10B981', subcategories: ['Consultoría', 'Asesoría', 'Mantenimiento', 'Soporte Técnico'] },
+    { name: 'Cartera Recuperada', icon: 'wallet', color: '#059669', subcategories: ['Cobro de Cartera', 'Pagos Pendientes', 'Acuerdos de Pago'] },
+    { name: 'Inversiones', icon: 'trending-up', color: '#0EA5E9', subcategories: ['Rendimientos CDT', 'Dividendos', 'Intereses Ganados'] },
+    { name: 'Otros Ingresos', icon: 'plus-circle', color: '#047857', subcategories: ['Arriendos', 'Comisiones', 'Reembolsos'] },
   ],
   expense: [
-    { name: 'Alimentación', icon: 'utensils', color: '#EF4444' },
-    { name: 'Transporte', icon: 'car', color: '#F97316' },
-    { name: 'Servicios', icon: 'home', color: '#F59E0B' },
-    { name: 'Entretenimiento', icon: 'film', color: '#8B5CF6' },
-    { name: 'Salud', icon: 'heart', color: '#EC4899' },
-    { name: 'Educación', icon: 'book', color: '#3B82F6' },
-    { name: 'Otros Gastos', icon: 'more-horizontal', color: '#6B7280' },
+    { name: 'Nómina y Personal', icon: 'users', color: '#EF4444', subcategories: ['Salarios', 'Prima de Servicios', 'Cesantías', 'Seguridad Social', 'ARL', 'Caja de Compensación', 'Vacaciones'] },
+    { name: 'Arriendo y Local', icon: 'building-2', color: '#F97316', subcategories: ['Arriendo Local', 'Arriendo Bodega', 'Administración', 'Arriendo Oficina'] },
+    { name: 'Servicios Públicos', icon: 'zap', color: '#F59E0B', subcategories: ['Energía Eléctrica', 'Agua', 'Gas', 'Internet', 'Telefonía Fija', 'Telefonía Móvil'] },
+    { name: 'Impuestos y Obligaciones', icon: 'landmark', color: '#DC2626', subcategories: ['IVA', 'Retención en la Fuente', 'ICA', 'Renta', 'Cámara de Comercio', 'DIAN', 'Predial'] },
+    { name: 'Proveedores y Materia Prima', icon: 'package', color: '#8B5CF6', subcategories: ['Materia Prima', 'Insumos', 'Mercancía', 'Inventario'] },
+    { name: 'Transporte y Logística', icon: 'truck', color: '#3B82F6', subcategories: ['Combustible', 'Envíos', 'Peajes', 'Mantenimiento Vehículos', 'SOAT', 'Tecnomecánica'] },
+    { name: 'Marketing y Publicidad', icon: 'megaphone', color: '#EC4899', subcategories: ['Redes Sociales', 'Google Ads', 'Material Impreso', 'Eventos', 'Diseño Gráfico'] },
+    { name: 'Tecnología', icon: 'monitor', color: '#06B6D4', subcategories: ['Software', 'Hosting', 'Dominio', 'Equipos de Cómputo', 'Licencias'] },
+    { name: 'Aseo y Mantenimiento', icon: 'sparkles', color: '#14B8A6', subcategories: ['Aseo Oficina', 'Mantenimiento General', 'Fumigación', 'Insumos de Aseo'] },
+    { name: 'Seguros', icon: 'shield', color: '#6366F1', subcategories: ['Seguro de Local', 'Seguro de Vehículos', 'Póliza de Cumplimiento', 'Seguro Todo Riesgo'] },
+    { name: 'Honorarios Profesionales', icon: 'graduation-cap', color: '#A855F7', subcategories: ['Contador', 'Abogado', 'Consultoría Externa', 'Revisor Fiscal'] },
+    { name: 'Gastos Bancarios', icon: 'credit-card', color: '#64748B', subcategories: ['Comisiones Bancarias', '4x1000 (GMF)', 'Intereses Crédito', 'Cuota de Manejo'] },
+    { name: 'Otros Gastos', icon: 'more-horizontal', color: '#6B7280', subcategories: ['Papelería', 'Cafetería', 'Representación', 'Imprevistos'] },
   ],
 };
+
+// Función reutilizable para inicializar categorías y subcategorías de un usuario
+export async function initDefaultCategories(userId) {
+  const { count } = await supabaseAdmin
+    .from('categories')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  if (count > 0) return null;
+
+  const categoriesToInsert = [
+    ...DEFAULT_CATEGORIES.income.map(c => ({ name: c.name, icon: c.icon, color: c.color, type: 'income', user_id: userId })),
+    ...DEFAULT_CATEGORIES.expense.map(c => ({ name: c.name, icon: c.icon, color: c.color, type: 'expense', user_id: userId })),
+  ];
+
+  const { data: createdCats, error: catError } = await supabaseAdmin
+    .from('categories')
+    .insert(categoriesToInsert)
+    .select();
+
+  if (catError) throw catError;
+
+  const allDefaults = [
+    ...DEFAULT_CATEGORIES.income.map(c => ({ ...c, type: 'income' })),
+    ...DEFAULT_CATEGORIES.expense.map(c => ({ ...c, type: 'expense' })),
+  ];
+
+  const subsToInsert = [];
+  for (const cat of createdCats) {
+    const defaultDef = allDefaults.find(d => d.name === cat.name && d.type === cat.type);
+    if (defaultDef?.subcategories) {
+      for (const subName of defaultDef.subcategories) {
+        subsToInsert.push({ category_id: cat.id, user_id: userId, name: subName });
+      }
+    }
+  }
+
+  if (subsToInsert.length > 0) {
+    const { error: subError } = await supabaseAdmin
+      .from('subcategories')
+      .insert(subsToInsert);
+    if (subError) throw subError;
+  }
+
+  return createdCats;
+}
 
 // Proteger todas las rutas
 router.use(authenticate);
@@ -212,32 +265,15 @@ router.delete('/:id', async (req, res) => {
 // Inicializar categorías por defecto para un usuario
 router.post('/init', async (req, res) => {
   try {
-    // Verificar si ya tiene categorías
-    const { count } = await supabaseAdmin
-      .from('categories')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', req.user.id);
+    const result = await initDefaultCategories(req.user.id);
 
-    if (count > 0) {
+    if (result === null) {
       return sendError(res, 'VALIDATION_ERROR', 'Ya tienes categorías configuradas');
     }
 
-    // Crear todas las categorías por defecto
-    const categoriesToInsert = [
-      ...DEFAULT_CATEGORIES.income.map(c => ({ ...c, type: 'income', user_id: req.user.id })),
-      ...DEFAULT_CATEGORIES.expense.map(c => ({ ...c, type: 'expense', user_id: req.user.id })),
-    ];
-
-    const { data, error } = await supabaseAdmin
-      .from('categories')
-      .insert(categoriesToInsert)
-      .select();
-
-    if (error) throw error;
-
     success(res, { 
-      categories: data, 
-      message: 'Categorías inicializadas correctamente' 
+      categories: result, 
+      message: 'Categorías y subcategorías inicializadas correctamente' 
     }, 201);
   } catch (error) {
     console.error('Error initializing categories:', error);
