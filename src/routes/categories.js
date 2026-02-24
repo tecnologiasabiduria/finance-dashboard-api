@@ -32,18 +32,27 @@ const DEFAULT_CATEGORIES = {
 };
 
 // Función reutilizable para inicializar categorías y subcategorías de un usuario
+// Agrega solo las categorías por defecto que el usuario aún no tiene (evita duplicados)
 export async function initDefaultCategories(userId) {
-  const { count } = await supabaseAdmin
+  const { data: existingCats } = await supabaseAdmin
     .from('categories')
-    .select('id', { count: 'exact', head: true })
+    .select('name, type')
     .eq('user_id', userId);
 
-  if (count > 0) return null;
+  const existingSet = new Set(
+    (existingCats || []).map(c => `${c.type}::${c.name.toLowerCase()}`)
+  );
 
-  const categoriesToInsert = [
-    ...DEFAULT_CATEGORIES.income.map(c => ({ name: c.name, icon: c.icon, color: c.color, type: 'income', user_id: userId })),
-    ...DEFAULT_CATEGORIES.expense.map(c => ({ name: c.name, icon: c.icon, color: c.color, type: 'expense', user_id: userId })),
+  const allDefaults = [
+    ...DEFAULT_CATEGORIES.income.map(c => ({ ...c, type: 'income' })),
+    ...DEFAULT_CATEGORIES.expense.map(c => ({ ...c, type: 'expense' })),
   ];
+
+  const categoriesToInsert = allDefaults
+    .filter(c => !existingSet.has(`${c.type}::${c.name.toLowerCase()}`))
+    .map(c => ({ name: c.name, icon: c.icon, color: c.color, type: c.type, user_id: userId }));
+
+  if (categoriesToInsert.length === 0) return null;
 
   const { data: createdCats, error: catError } = await supabaseAdmin
     .from('categories')
@@ -51,11 +60,6 @@ export async function initDefaultCategories(userId) {
     .select();
 
   if (catError) throw catError;
-
-  const allDefaults = [
-    ...DEFAULT_CATEGORIES.income.map(c => ({ ...c, type: 'income' })),
-    ...DEFAULT_CATEGORIES.expense.map(c => ({ ...c, type: 'expense' })),
-  ];
 
   const subsToInsert = [];
   for (const cat of createdCats) {
@@ -268,12 +272,15 @@ router.post('/init', async (req, res) => {
     const result = await initDefaultCategories(req.user.id);
 
     if (result === null) {
-      return sendError(res, 'VALIDATION_ERROR', 'Ya tienes categorías configuradas');
+      return success(res, { 
+        categories: [], 
+        message: 'Ya tienes todas las categorías por defecto' 
+      });
     }
 
     success(res, { 
       categories: result, 
-      message: 'Categorías y subcategorías inicializadas correctamente' 
+      message: `Se agregaron ${result.length} categorías por defecto correctamente` 
     }, 201);
   } catch (error) {
     console.error('Error initializing categories:', error);
