@@ -8,25 +8,29 @@ const router = Router();
 // Categorías por defecto para perfil empresarial colombiano
 const DEFAULT_CATEGORIES = {
   income: [
-    { name: 'Ventas', icon: 'shopping-cart', color: '#22C55E', subcategories: ['Ventas de Contado', 'Ventas a Crédito', 'Ventas por Mayor'] },
-    { name: 'Servicios Prestados', icon: 'briefcase', color: '#10B981', subcategories: ['Consultoría', 'Asesoría', 'Mantenimiento', 'Soporte Técnico'] },
+    { name: 'Ventas', icon: 'shopping-cart', color: '#22C55E', subcategories: ['Ventas de Contado', 'Ventas a Crédito', 'Ventas por Mayor', 'Ventas Online'] },
+    { name: 'Servicios Prestados', icon: 'briefcase', color: '#10B981', subcategories: ['Consultoría', 'Asesoría', 'Mantenimiento', 'Soporte Técnico', 'Implementación'] },
+    { name: 'Consultoría y Formación', icon: 'graduation-cap', color: '#8B5CF6', subcategories: ['Consultoría Empresarial', 'Mentoría', 'Talleres', 'Cursos', 'Conferencias', 'Coaching'] },
+    { name: 'Eventos e Ingresos Especiales', icon: 'calendar', color: '#F97316', subcategories: ['Organización de Eventos', 'Patrocinios Recibidos', 'Stands y Ferias', 'Entradas y Boletería', 'Webinars Pagos'] },
     { name: 'Cartera Recuperada', icon: 'wallet', color: '#059669', subcategories: ['Cobro de Cartera', 'Pagos Pendientes', 'Acuerdos de Pago'] },
     { name: 'Inversiones', icon: 'trending-up', color: '#0EA5E9', subcategories: ['Rendimientos CDT', 'Dividendos', 'Intereses Ganados'] },
-    { name: 'Otros Ingresos', icon: 'plus-circle', color: '#047857', subcategories: ['Arriendos', 'Comisiones', 'Reembolsos'] },
+    { name: 'Otros Ingresos', icon: 'plus-circle', color: '#047857', subcategories: ['Arriendos', 'Comisiones', 'Reembolsos', 'Afiliaciones'] },
   ],
   expense: [
     { name: 'Nómina y Personal', icon: 'users', color: '#EF4444', subcategories: ['Salarios', 'Prima de Servicios', 'Cesantías', 'Seguridad Social', 'ARL', 'Caja de Compensación', 'Vacaciones'] },
-    { name: 'Arriendo y Local', icon: 'building-2', color: '#F97316', subcategories: ['Arriendo Local', 'Arriendo Bodega', 'Administración', 'Arriendo Oficina'] },
+    { name: 'Arriendo y Local', icon: 'building-2', color: '#F97316', subcategories: ['Arriendo Local', 'Arriendo Bodega', 'Administración', 'Arriendo Oficina', 'Coworking'] },
     { name: 'Servicios Públicos', icon: 'zap', color: '#F59E0B', subcategories: ['Energía Eléctrica', 'Agua', 'Gas', 'Internet', 'Telefonía Fija', 'Telefonía Móvil'] },
     { name: 'Impuestos y Obligaciones', icon: 'landmark', color: '#DC2626', subcategories: ['IVA', 'Retención en la Fuente', 'ICA', 'Renta', 'Cámara de Comercio', 'DIAN', 'Predial'] },
     { name: 'Proveedores y Materia Prima', icon: 'package', color: '#8B5CF6', subcategories: ['Materia Prima', 'Insumos', 'Mercancía', 'Inventario'] },
     { name: 'Transporte y Logística', icon: 'truck', color: '#3B82F6', subcategories: ['Combustible', 'Envíos', 'Peajes', 'Mantenimiento Vehículos', 'SOAT', 'Tecnomecánica'] },
-    { name: 'Marketing y Publicidad', icon: 'megaphone', color: '#EC4899', subcategories: ['Redes Sociales', 'Google Ads', 'Material Impreso', 'Eventos', 'Diseño Gráfico'] },
-    { name: 'Tecnología', icon: 'monitor', color: '#06B6D4', subcategories: ['Software', 'Hosting', 'Dominio', 'Equipos de Cómputo', 'Licencias'] },
+    { name: 'Marketing y Publicidad', icon: 'megaphone', color: '#EC4899', subcategories: ['Redes Sociales', 'Google Ads', 'Material Impreso', 'Eventos Promocionales', 'Diseño Gráfico', 'Email Marketing', 'Influencers'] },
+    { name: 'Plataformas Digitales', icon: 'globe', color: '#6366F1', subcategories: ['Zoom', 'Google Workspace', 'Microsoft 365', 'CRM (HubSpot/Salesforce)', 'Slack', 'Canva', 'ChatGPT / IA', 'Notion', 'Trello / Asana', 'Mailchimp', 'WhatsApp Business', 'Contabilidad Online'] },
+    { name: 'Tecnología y Equipos', icon: 'monitor', color: '#06B6D4', subcategories: ['Equipos de Cómputo', 'Hosting y Servidores', 'Dominio Web', 'Desarrollo de Software', 'Licencias', 'Mantenimiento TI'] },
+    { name: 'Eventos y Capacitación', icon: 'calendar', color: '#0EA5E9', subcategories: ['Conferencias', 'Seminarios', 'Ferias Comerciales', 'Capacitación de Personal', 'Networking', 'Material de Eventos', 'Viáticos de Eventos', 'Inscripciones y Membresías'] },
     { name: 'Aseo y Mantenimiento', icon: 'sparkles', color: '#14B8A6', subcategories: ['Aseo Oficina', 'Mantenimiento General', 'Fumigación', 'Insumos de Aseo'] },
-    { name: 'Seguros', icon: 'shield', color: '#6366F1', subcategories: ['Seguro de Local', 'Seguro de Vehículos', 'Póliza de Cumplimiento', 'Seguro Todo Riesgo'] },
-    { name: 'Honorarios Profesionales', icon: 'graduation-cap', color: '#A855F7', subcategories: ['Contador', 'Abogado', 'Consultoría Externa', 'Revisor Fiscal'] },
-    { name: 'Gastos Bancarios', icon: 'credit-card', color: '#64748B', subcategories: ['Comisiones Bancarias', '4x1000 (GMF)', 'Intereses Crédito', 'Cuota de Manejo'] },
+    { name: 'Seguros', icon: 'shield', color: '#7C3AED', subcategories: ['Seguro de Local', 'Seguro de Vehículos', 'Póliza de Cumplimiento', 'Seguro Todo Riesgo'] },
+    { name: 'Honorarios Profesionales', icon: 'graduation-cap', color: '#A855F7', subcategories: ['Contador', 'Abogado', 'Consultoría Externa', 'Revisor Fiscal', 'Coaching Empresarial'] },
+    { name: 'Gastos Bancarios', icon: 'credit-card', color: '#64748B', subcategories: ['Comisiones Bancarias', '4x1000 (GMF)', 'Intereses Crédito', 'Cuota de Manejo', 'Pasarelas de Pago'] },
     { name: 'Otros Gastos', icon: 'more-horizontal', color: '#6B7280', subcategories: ['Papelería', 'Cafetería', 'Representación', 'Imprevistos'] },
   ],
 };
@@ -87,7 +91,7 @@ router.use(authenticate);
 // Obtener todas las categorías del usuario
 router.get('/', async (req, res) => {
   try {
-    const { data, error } = await supabaseAdmin
+    let { data, error } = await supabaseAdmin
       .from('categories')
       .select('*')
       .eq('user_id', req.user.id)
@@ -96,13 +100,20 @@ router.get('/', async (req, res) => {
 
     if (error) throw error;
 
-    // Si no tiene categorías, devolver listas vacías
-    if (!data || data.length === 0) {
-      return success(res, { 
-        categories: [],
-        grouped: { income: [], expense: [] },
-        hasCustomCategories: false
-      });
+    // Siempre verificar y agregar categorías por defecto faltantes
+    try {
+      const added = await initDefaultCategories(req.user.id);
+      if (added) {
+        const refetch = await supabaseAdmin
+          .from('categories')
+          .select('*')
+          .eq('user_id', req.user.id)
+          .order('type')
+          .order('name');
+        data = refetch.data || data;
+      }
+    } catch (initErr) {
+      console.error('Error syncing default categories:', initErr);
     }
 
     // Obtener subcategorías del usuario
