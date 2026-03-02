@@ -153,6 +153,7 @@ router.post(
           id: user.id,
           email: user.email,
           name: profile?.full_name || user.user_metadata?.full_name,
+          onboardingCompleted: profile?.onboarding_completed ?? false,
         },
         token: session.access_token,
         refreshToken: session.refresh_token,
@@ -202,6 +203,7 @@ router.get('/me', authenticate, async (req, res) => {
         email: req.user.email,
         name: profile?.full_name || req.user.user_metadata?.full_name,
         createdAt: profile?.created_at,
+        onboardingCompleted: profile?.onboarding_completed ?? false,
       },
       subscription: subscription
         ? {
@@ -385,6 +387,31 @@ router.put('/password', authenticate, async (req, res) => {
     return success(res, { message: 'Contraseña actualizada correctamente' });
   } catch (err) {
     console.error('Update password error:', err);
+    return sendError(res, 'INTERNAL_ERROR');
+  }
+});
+
+/**
+ * PUT /auth/onboarding
+ * Marcar onboarding como completado
+ */
+router.put('/onboarding', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const { error } = await supabaseAdmin
+      .from('profiles')
+      .update({ onboarding_completed: true, updated_at: new Date().toISOString() })
+      .eq('id', userId);
+
+    if (error) {
+      console.error('Update onboarding error:', error);
+      return sendError(res, 'INTERNAL_ERROR', 'Error al actualizar onboarding');
+    }
+
+    return success(res, { onboardingCompleted: true });
+  } catch (err) {
+    console.error('Update onboarding error:', err);
     return sendError(res, 'INTERNAL_ERROR');
   }
 });
