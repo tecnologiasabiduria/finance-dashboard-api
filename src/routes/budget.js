@@ -107,6 +107,39 @@ router.put('/config', async (req, res) => {
   }
 });
 
+/**
+ * DELETE /budget/config?year=2026
+ * Eliminar configuración de presupuesto para un año
+ */
+router.delete('/config', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+
+    // Delete pockets first
+    const { error: pocketsError } = await supabaseAdmin
+      .from('budget_pockets')
+      .delete()
+      .eq('user_id', userId);
+
+    if (pocketsError) throw pocketsError;
+
+    // Delete config
+    const { error } = await supabaseAdmin
+      .from('budget_config')
+      .delete()
+      .eq('user_id', userId)
+      .eq('year', year);
+
+    if (error) throw error;
+
+    success(res, { deleted: true });
+  } catch (err) {
+    console.error('Error deleting budget config:', err);
+    sendError(res, 'INTERNAL_ERROR', 'Error al eliminar configuración de presupuesto');
+  }
+});
+
 // ============================================================
 // BUDGET POCKETS — Bolsillos de presupuesto
 // ============================================================
