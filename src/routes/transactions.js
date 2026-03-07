@@ -87,6 +87,119 @@ router.get('/', async (req, res) => {
 });
 
 /**
+ * POST /transactions/import
+ * Importar múltiples transacciones desde CSV
+ */
+router.post('/import', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { transactions } = req.body;
+
+    if (!Array.isArray(transactions) || transactions.length === 0) {
+      return sendError(res, 'VALIDATION_ERROR', 'Se requiere un array de transacciones');
+    }
+
+    // Límite de 500 transacciones por importación
+    if (transactions.length > 500) {
+      return sendError(res, 'VALIDATION_ERROR', 'Máximo 500 transacciones por importación');
+    }
+
+    const validTypes = ['income', 'expense', 'transfer'];
+    const validInvoiceStatuses = ['FACTURADO', 'NO FACTURADO'];
+    const errors = [];
+    const rows = [];
+
+    for (let i = 0; i < transactions.length; i++) {
+      const t = transactions[i];
+
+      // Validar campos obligatorios
+      if (!t.date || !t.amount) {
+        errors.push({ row: i + 1, message: 'Fecha y monto son obligatorios' });
+        continue;
+      }
+
+      const amount = parseFloat(t.amount);
+      if (isNaN(amount) || amount <= 0) {
+        errors.push({ row: i + 1, message: `Monto inválido: ${t.amount}` });
+        continue;
+      }
+
+      const type = validTypes.includes(t.type) ? t.type : 'expense';
+
+      const row = {
+        user_id: userId,
+        type,
+        amount,
+        date: t.date,
+        category: t.category || null,
+        description: t.description || null,
+      };
+
+      // Campos de ingreso
+      if (type === 'income') {
+        if (t.invoice_number) row.invoice_number = t.invoice_number;
+        if (t.client_document) row.client_document = t.client_document;
+        if (t.client_name) row.client_name = t.client_name;
+        if (t.client_address) row.client_address = t.client_address;
+        if (t.client_email) row.client_email = t.client_email;
+        if (t.client_phone) row.client_phone = t.client_phone;
+        if (t.invoice_status && validInvoiceStatuses.includes(t.invoice_status)) {
+          row.invoice_status = t.invoice_status;
+        }
+      }
+
+      // Campos de gasto
+      if (type === 'expense') {
+        if (t.provider_document) row.provider_document = t.provider_document;
+        if (t.provider_name) row.provider_name = t.provider_name;
+        if (t.payment_method) row.payment_method = t.payment_method;
+      }
+
+      // Campos de transferencia
+      if (type === 'transfer') {
+        if (t.source_account) row.source_account = t.source_account;
+        if (t.destination_account) row.destination_account = t.destination_account;
+      }
+
+      rows.push(row);
+    }
+
+    if (rows.length === 0) {
+      return sendError(res, 'VALIDATION_ERROR', 'Ninguna transacción válida para importar');
+    }
+
+    // Insertar en lotes de 100
+    let imported = 0;
+    const batchSize = 100;
+    const insertErrors = [];
+
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const batch = rows.slice(i, i + batchSize);
+      const { data, error } = await supabaseAdmin
+        .from('transactions')
+        .insert(batch)
+        .select('id');
+
+      if (error) {
+        console.error(`Import batch error (rows ${i}-${i + batch.length}):`, error);
+        insertErrors.push(`Lote ${Math.floor(i / batchSize) + 1}: ${error.message}`);
+      } else {
+        imported += data.length;
+      }
+    }
+
+    return success(res, {
+      imported,
+      failed: transactions.length - imported,
+      errors: [...errors, ...insertErrors.map((e) => ({ message: e }))],
+    }, 201);
+  } catch (err) {
+    console.error('Import transactions error:', err);
+    return sendError(res, 'INTERNAL_ERROR', 'Error al importar transacciones');
+  }
+});
+
+/**
  * GET /transactions/:id
  * Obtener una transacción específica
  */
