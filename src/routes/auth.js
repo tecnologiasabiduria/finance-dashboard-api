@@ -277,7 +277,7 @@ router.post(
     try {
       const { email } = req.body;
 
-      const redirectTo = `${config.frontendUrl}/auth/callback`;
+      const redirectTo = `${config.frontendUrl}/auth/callback?type=recovery`;
 
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo,
