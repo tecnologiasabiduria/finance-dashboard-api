@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { supabase } from '../config/supabase.js';
+import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate } from '../middlewares/auth.js';
 import { requireSubscriptionOrDev } from '../middlewares/subscription.js';
 import { success, sendError } from '../utils/response.js';
@@ -13,7 +13,7 @@ router.use(requireSubscriptionOrDev);
 router.get('/', async (req, res) => {
   try {
     const userId = req.user.id;
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('cartera')
       .select('*')
       .eq('user_id', userId)
@@ -24,7 +24,7 @@ router.get('/', async (req, res) => {
     const ids = data.map((r) => r.id);
     let pagosData = [];
     if (ids.length > 0) {
-      const { data: pagos, error: pagosError } = await supabase
+      const { data: pagos, error: pagosError } = await supabaseAdmin
         .from('cartera_pagos')
         .select('cartera_id, monto')
         .eq('user_id', userId)
@@ -58,7 +58,7 @@ router.get('/', async (req, res) => {
 // ─── GET /cartera/:id ─ Detalle de una cuenta ───────────────────────────────
 router.get('/:id', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('cartera')
       .select('*')
       .eq('id', req.params.id)
@@ -70,7 +70,7 @@ router.get('/:id', async (req, res) => {
     }
 
     // Get pagos for this record
-    const { data: pagos, error: pagosError } = await supabase
+    const { data: pagos, error: pagosError } = await supabaseAdmin
       .from('cartera_pagos')
       .select('*')
       .eq('cartera_id', data.id)
@@ -105,8 +105,11 @@ router.post('/', async (req, res) => {
     if (isNaN(cashNum) || cashNum < 0) {
       return sendError(res, 'VALIDATION_ERROR', 'El cash debe ser un número mayor o igual a 0');
     }
+    if (cashNum > valorNum) {
+      return sendError(res, 'VALIDATION_ERROR', 'El cash no puede ser mayor al valor de la venta');
+    }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('cartera')
       .insert({
         user_id: req.user.id,
@@ -133,9 +136,9 @@ router.post('/', async (req, res) => {
 // ─── PUT /cartera/:id ─ Actualizar cuenta de cartera ────────────────────────
 router.put('/:id', async (req, res) => {
   try {
-    const { data: existing } = await supabase
+    const { data: existing } = await supabaseAdmin
       .from('cartera')
-      .select('id')
+      .select('*')
       .eq('id', req.params.id)
       .eq('user_id', req.user.id)
       .single();
@@ -153,7 +156,14 @@ router.put('/:id', async (req, res) => {
     if (producto !== undefined) updateData.producto = producto || null;
     if (notas !== undefined) updateData.notas = notas || null;
 
-    const { data, error } = await supabase
+    // Validate cash <= valor_venta
+    const finalValor = updateData.valor_venta !== undefined ? updateData.valor_venta : Number(existing.valor_venta);
+    const finalCash = updateData.cash !== undefined ? updateData.cash : Number(existing.cash);
+    if (finalCash > finalValor) {
+      return sendError(res, 'VALIDATION_ERROR', 'El cash no puede ser mayor al valor de la venta');
+    }
+
+    const { data, error } = await supabaseAdmin
       .from('cartera')
       .update(updateData)
       .eq('id', req.params.id)
@@ -162,7 +172,16 @@ router.put('/:id', async (req, res) => {
       .single();
     if (error) throw error;
 
-    success(res, { record: data });
+    // Compute total_abonos and saldo for response
+    const { data: pagos } = await supabaseAdmin
+      .from('cartera_pagos')
+      .select('monto')
+      .eq('cartera_id', data.id)
+      .eq('user_id', req.user.id);
+    const totalAbonos = (pagos || []).reduce((s, p) => s + Number(p.monto), 0);
+    const saldo = Math.max(0, Number(data.valor_venta) - Number(data.cash) - totalAbonos);
+
+    success(res, { record: { ...data, total_abonos: totalAbonos, saldo } });
   } catch (error) {
     console.error('Error updating cartera record:', error);
     sendError(res, 'INTERNAL_ERROR', 'Error al actualizar registro de cartera');
@@ -172,7 +191,7 @@ router.put('/:id', async (req, res) => {
 // ─── DELETE /cartera/:id ─ Eliminar cuenta (CASCADE borra pagos) ────────────
 router.delete('/:id', async (req, res) => {
   try {
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('cartera')
       .delete()
       .eq('id', req.params.id)
@@ -193,7 +212,7 @@ router.delete('/:id', async (req, res) => {
 router.get('/:id/pagos', async (req, res) => {
   try {
     // Verify ownership of the parent cartera record
-    const { data: cartera } = await supabase
+    const { data: cartera } = await supabaseAdmin
       .from('cartera')
       .select('id')
       .eq('id', req.params.id)
@@ -201,7 +220,7 @@ router.get('/:id/pagos', async (req, res) => {
       .single();
     if (!cartera) return sendError(res, 'NOT_FOUND', 'Registro de cartera no encontrado');
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('cartera_pagos')
       .select('*')
       .eq('cartera_id', req.params.id)
@@ -219,10 +238,10 @@ router.get('/:id/pagos', async (req, res) => {
 // ─── POST /cartera/:id/pagos ─ Agregar un pago/abono ───────────────────────
 router.post('/:id/pagos', async (req, res) => {
   try {
-    // Verify ownership
-    const { data: cartera } = await supabase
+    // Verify ownership and get cartera data for validation
+    const { data: cartera } = await supabaseAdmin
       .from('cartera')
-      .select('id')
+      .select('id, valor_venta, cash')
       .eq('id', req.params.id)
       .eq('user_id', req.user.id)
       .single();
@@ -238,7 +257,20 @@ router.post('/:id/pagos', async (req, res) => {
       return sendError(res, 'VALIDATION_ERROR', 'El monto debe ser un número mayor a 0');
     }
 
-    const { data, error } = await supabase
+    // Validate monto does not exceed remaining saldo
+    const { data: existingPagos } = await supabaseAdmin
+      .from('cartera_pagos')
+      .select('monto')
+      .eq('cartera_id', req.params.id)
+      .eq('user_id', req.user.id);
+    const totalAbonos = (existingPagos || []).reduce((s, p) => s + Number(p.monto), 0);
+    const saldoActual = Math.max(0, Number(cartera.valor_venta) - Number(cartera.cash) - totalAbonos);
+
+    if (montoNum > saldoActual) {
+      return sendError(res, 'VALIDATION_ERROR', `El monto del abono excede el saldo pendiente ($${saldoActual.toFixed(2)})`);
+    }
+
+    const { data, error } = await supabaseAdmin
       .from('cartera_pagos')
       .insert({
         cartera_id: req.params.id,
@@ -258,10 +290,80 @@ router.post('/:id/pagos', async (req, res) => {
   }
 });
 
+// ─── PUT /cartera/:id/pagos/:pagoId ─ Editar un pago/abono ─────────────────
+router.put('/:id/pagos/:pagoId', async (req, res) => {
+  try {
+    // Verify ownership of parent cartera
+    const { data: cartera } = await supabaseAdmin
+      .from('cartera')
+      .select('valor_venta, cash')
+      .eq('id', req.params.id)
+      .eq('user_id', req.user.id)
+      .single();
+    if (!cartera) return sendError(res, 'NOT_FOUND', 'Registro de cartera no encontrado');
+
+    // Verify pago exists and belongs to user
+    const { data: existingPago } = await supabaseAdmin
+      .from('cartera_pagos')
+      .select('*')
+      .eq('id', req.params.pagoId)
+      .eq('cartera_id', req.params.id)
+      .eq('user_id', req.user.id)
+      .single();
+    if (!existingPago) return sendError(res, 'NOT_FOUND', 'Pago no encontrado');
+
+    const { fecha, monto, notas } = req.body;
+    const updateData = {};
+
+    if (fecha !== undefined) updateData.fecha = fecha;
+    if (notas !== undefined) updateData.notas = notas || null;
+    if (monto !== undefined) {
+      const montoNum = Number(monto);
+      if (isNaN(montoNum) || montoNum <= 0) {
+        return sendError(res, 'VALIDATION_ERROR', 'El monto debe ser un número mayor a 0');
+      }
+
+      // Validate new monto doesn't exceed saldo (excluding this pago's current monto)
+      const { data: otherPagos } = await supabaseAdmin
+        .from('cartera_pagos')
+        .select('monto')
+        .eq('cartera_id', req.params.id)
+        .eq('user_id', req.user.id)
+        .neq('id', req.params.pagoId);
+      const otherAbonos = (otherPagos || []).reduce((s, p) => s + Number(p.monto), 0);
+      const saldoDisponible = Number(cartera.valor_venta) - Number(cartera.cash) - otherAbonos;
+
+      if (montoNum > saldoDisponible) {
+        return sendError(res, 'VALIDATION_ERROR', `El monto excede el saldo disponible ($${saldoDisponible.toFixed(2)})`);
+      }
+      updateData.monto = montoNum;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return sendError(res, 'VALIDATION_ERROR', 'No se proporcionaron campos para actualizar');
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('cartera_pagos')
+      .update(updateData)
+      .eq('id', req.params.pagoId)
+      .eq('cartera_id', req.params.id)
+      .eq('user_id', req.user.id)
+      .select()
+      .single();
+    if (error) throw error;
+
+    success(res, { pago: data });
+  } catch (error) {
+    console.error('Error updating cartera pago:', error);
+    sendError(res, 'INTERNAL_ERROR', 'Error al actualizar pago de cartera');
+  }
+});
+
 // ─── DELETE /cartera/:id/pagos/:pagoId ─ Eliminar un pago ──────────────────
 router.delete('/:id/pagos/:pagoId', async (req, res) => {
   try {
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('cartera_pagos')
       .delete()
       .eq('id', req.params.pagoId)
