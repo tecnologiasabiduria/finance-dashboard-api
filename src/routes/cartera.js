@@ -92,10 +92,10 @@ router.get('/:id', async (req, res) => {
 // ─── POST /cartera ─ Crear nueva cuenta de cartera ──────────────────────────
 router.post('/', async (req, res) => {
   try {
-    const { nombre, fecha_venta, valor_venta, cash = 0, plataforma, fuente, producto, notas } = req.body;
+    const { nombre, documento, email, telefono, direccion, fecha_venta, valor_venta, cash = 0, plataforma, fuente, producto, notas } = req.body;
 
-    if (!nombre || !fecha_venta || valor_venta === undefined || valor_venta === '') {
-      return sendError(res, 'VALIDATION_ERROR', 'Nombre, fecha de venta y valor de la venta son requeridos');
+    if (!nombre || !documento || !fecha_venta || valor_venta === undefined || valor_venta === '') {
+      return sendError(res, 'VALIDATION_ERROR', 'Nombre, documento, fecha de venta y valor de la venta son requeridos');
     }
 
     const valorNum = Number(valor_venta);
@@ -115,6 +115,10 @@ router.post('/', async (req, res) => {
       .insert({
         user_id: req.user.id,
         nombre,
+        documento,
+        email: email || null,
+        telefono: telefono || null,
+        direccion: direccion || null,
         fecha_venta,
         valor_venta: valorNum,
         cash: cashNum,
@@ -145,10 +149,14 @@ router.put('/:id', async (req, res) => {
       .single();
     if (!existing) return sendError(res, 'NOT_FOUND', 'Registro de cartera no encontrado');
 
-    const { nombre, fecha_venta, valor_venta, cash, plataforma, fuente, producto, notas } = req.body;
+    const { nombre, documento, email, telefono, direccion, fecha_venta, valor_venta, cash, plataforma, fuente, producto, notas } = req.body;
     const updateData = { updated_at: new Date().toISOString() };
 
     if (nombre !== undefined) updateData.nombre = nombre;
+    if (documento !== undefined) updateData.documento = documento;
+    if (email !== undefined) updateData.email = email || null;
+    if (telefono !== undefined) updateData.telefono = telefono || null;
+    if (direccion !== undefined) updateData.direccion = direccion || null;
     if (fecha_venta !== undefined) updateData.fecha_venta = fecha_venta;
     if (valor_venta !== undefined) updateData.valor_venta = Number(valor_venta);
     if (cash !== undefined) updateData.cash = Number(cash);

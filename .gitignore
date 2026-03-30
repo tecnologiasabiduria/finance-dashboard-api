@@ -4,3 +4,5 @@ node_modules
 .DS_Store
 dist
 coverage
+migrations/README.md
+migrations/20260330_add_cartera_client_fields.sql
