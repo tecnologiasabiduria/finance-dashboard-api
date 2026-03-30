@@ -1,11 +1,17 @@
 import { Router } from 'express';
-import { supabaseAdmin, getSupabaseClient } from '../config/supabase.js';
+import { supabaseAdmin } from '../config/supabase.js';
 import { success, sendError } from '../utils/response.js';
 import { authenticate } from '../middlewares/auth.js';
 import { requireSubscriptionOrDev } from '../middlewares/subscription.js';
 import { validateBody, validateUUID } from '../middlewares/validate.js';
+import { getCarteraSaldoPendiente } from '../utils/carteraSaldo.js';
 
 const router = Router();
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function isUuid(value) {
+  return typeof value === 'string' && UUID_RE.test(value);
+}
 
 // Todas las rutas requieren autenticación y suscripción
 router.use(authenticate);
@@ -219,7 +225,30 @@ router.get('/:id', validateUUID('id'), async (req, res) => {
       return sendError(res, 'NOT_FOUND', 'Transacción no encontrada');
     }
 
-    return success(res, { transaction: data });
+    const { data: linkRow } = await supabaseAdmin
+      .from('cartera_pagos')
+      .select('id, cartera_id, monto, fecha')
+      .eq('transaction_id', id)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    let cartera_link = null;
+    if (linkRow) {
+      const { data: carRow } = await supabaseAdmin
+        .from('cartera')
+        .select('nombre')
+        .eq('id', linkRow.cartera_id)
+        .single();
+      cartera_link = {
+        pago_id: linkRow.id,
+        cartera_id: linkRow.cartera_id,
+        cartera_nombre: carRow?.nombre || null,
+        monto: linkRow.monto,
+        fecha: linkRow.fecha,
+      };
+    }
+
+    return success(res, { transaction: data, cartera_link });
   } catch (err) {
     console.error('Get transaction error:', err);
     return sendError(res, 'INTERNAL_ERROR');
@@ -251,12 +280,35 @@ router.post(
         provider_document, provider_name, payment_method,
         // Campos de transferencia
         source_account, destination_account,
+        cartera_id,
       } = req.body;
+
+      const amountNum = parseFloat(amount);
+      const carteraIdTrimmed = typeof cartera_id === 'string' ? cartera_id.trim() : '';
+      if (carteraIdTrimmed) {
+        if (type !== 'income') {
+          return sendError(res, 'VALIDATION_ERROR', 'cartera_id solo aplica a ingresos');
+        }
+        if (!isUuid(carteraIdTrimmed)) {
+          return sendError(res, 'VALIDATION_ERROR', 'cartera_id debe ser un UUID válido');
+        }
+        const { saldo, error: saldoErr } = await getCarteraSaldoPendiente(carteraIdTrimmed, userId);
+        if (saldoErr === 'NOT_FOUND') {
+          return sendError(res, 'NOT_FOUND', 'Registro de cartera no encontrado');
+        }
+        if (amountNum > saldo) {
+          return sendError(
+            res,
+            'VALIDATION_ERROR',
+            `El monto excede el saldo pendiente en cartera ($${saldo.toFixed(2)})`
+          );
+        }
+      }
 
       const insertData = {
         user_id: userId,
         type,
-        amount: parseFloat(amount),
+        amount: amountNum,
         category: category || null,
         description: description || null,
         date,
@@ -297,7 +349,30 @@ router.post(
         return sendError(res, 'INTERNAL_ERROR', 'Error al crear transacción');
       }
 
-      return success(res, { transaction: data }, 201);
+      let cartera_pago = null;
+      if (carteraIdTrimmed) {
+        const { data: pagoRow, error: pagoError } = await supabaseAdmin
+          .from('cartera_pagos')
+          .insert({
+            cartera_id: carteraIdTrimmed,
+            user_id: userId,
+            fecha: date,
+            monto: amountNum,
+            transaction_id: data.id,
+            notas: description || null,
+          })
+          .select()
+          .single();
+
+        if (pagoError) {
+          console.error('Create cartera_pago after transaction:', pagoError);
+          await supabaseAdmin.from('transactions').delete().eq('id', data.id).eq('user_id', userId);
+          return sendError(res, 'INTERNAL_ERROR', 'Error al vincular el abono en cartera');
+        }
+        cartera_pago = pagoRow;
+      }
+
+      return success(res, { transaction: data, cartera_pago }, 201);
     } catch (err) {
       console.error('Create transaction error:', err);
       return sendError(res, 'INTERNAL_ERROR');
@@ -324,17 +399,23 @@ router.put(
         source_account, destination_account,
       } = req.body;
 
-      // Verificar que existe y pertenece al usuario
-      const { data: existing } = await supabaseAdmin
+      const { data: existing, error: existingErr } = await supabaseAdmin
         .from('transactions')
-        .select('id')
+        .select('*')
         .eq('id', id)
         .eq('user_id', userId)
         .single();
 
-      if (!existing) {
+      if (existingErr || !existing) {
         return sendError(res, 'NOT_FOUND', 'Transacción no encontrada');
       }
+
+      const { data: linkedPago } = await supabaseAdmin
+        .from('cartera_pagos')
+        .select('id, cartera_id, monto, fecha')
+        .eq('transaction_id', id)
+        .eq('user_id', userId)
+        .maybeSingle();
 
       // Preparar datos de actualización
       const updateData = {};
@@ -361,6 +442,72 @@ router.put(
       // Campos de transferencia
       if (source_account !== undefined) updateData.source_account = source_account || null;
       if (destination_account !== undefined) updateData.destination_account = destination_account || null;
+
+      const nextType = updateData.type !== undefined ? updateData.type : existing.type;
+      if (linkedPago && nextType !== 'income') {
+        return sendError(
+          res,
+          'VALIDATION_ERROR',
+          'No puedes cambiar el tipo de un ingreso vinculado a cartera.'
+        );
+      }
+
+      if (linkedPago && (amount !== undefined || date !== undefined)) {
+        const newAmount = amount !== undefined ? parseFloat(amount) : Number(existing.amount);
+        const newDate = date !== undefined ? date : existing.date;
+        if (Number.isNaN(newAmount) || newAmount <= 0) {
+          return sendError(res, 'VALIDATION_ERROR', 'El monto debe ser mayor a 0');
+        }
+        const { saldo, error: saldoErr } = await getCarteraSaldoPendiente(
+          linkedPago.cartera_id,
+          userId,
+          { excludePagoId: linkedPago.id }
+        );
+        if (saldoErr === 'NOT_FOUND') {
+          return sendError(res, 'INTERNAL_ERROR', 'Error al validar saldo de cartera');
+        }
+        if (newAmount > saldo) {
+          return sendError(
+            res,
+            'VALIDATION_ERROR',
+            `El monto excede el saldo pendiente en cartera ($${saldo.toFixed(2)})`
+          );
+        }
+
+        const prevMonto = Number(linkedPago.monto);
+        const prevFecha = linkedPago.fecha;
+
+        const { error: pagoUpdErr } = await supabaseAdmin
+          .from('cartera_pagos')
+          .update({ monto: newAmount, fecha: newDate })
+          .eq('id', linkedPago.id)
+          .eq('user_id', userId);
+
+        if (pagoUpdErr) {
+          console.error('Sync cartera_pago on transaction update:', pagoUpdErr);
+          return sendError(res, 'INTERNAL_ERROR', 'Error al sincronizar abono de cartera');
+        }
+
+        const { data, error } = await supabaseAdmin
+          .from('transactions')
+          .update(updateData)
+          .eq('id', id)
+          .eq('user_id', userId)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Update transaction error:', error);
+          await supabaseAdmin
+            .from('cartera_pagos')
+            .update({ monto: prevMonto, fecha: prevFecha })
+            .eq('id', linkedPago.id)
+            .eq('user_id', userId);
+          return sendError(res, 'INTERNAL_ERROR', 'Error al actualizar transacción');
+        }
+
+        return success(res, { transaction: data });
+      }
 
       if (Object.keys(updateData).length === 0) {
         return sendError(res, 'VALIDATION_ERROR', 'No hay datos para actualizar');

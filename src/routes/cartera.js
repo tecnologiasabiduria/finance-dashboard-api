@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate } from '../middlewares/auth.js';
 import { requireSubscriptionOrDev } from '../middlewares/subscription.js';
 import { success, sendError } from '../utils/response.js';
+import { getCarteraSaldoPendiente } from '../utils/carteraSaldo.js';
 
 const router = Router();
 
@@ -238,15 +239,6 @@ router.get('/:id/pagos', async (req, res) => {
 // ─── POST /cartera/:id/pagos ─ Agregar un pago/abono ───────────────────────
 router.post('/:id/pagos', async (req, res) => {
   try {
-    // Verify ownership and get cartera data for validation
-    const { data: cartera } = await supabaseAdmin
-      .from('cartera')
-      .select('id, valor_venta, cash')
-      .eq('id', req.params.id)
-      .eq('user_id', req.user.id)
-      .single();
-    if (!cartera) return sendError(res, 'NOT_FOUND', 'Registro de cartera no encontrado');
-
     const { fecha, monto, notas } = req.body;
     if (!fecha || monto === undefined || monto === '') {
       return sendError(res, 'VALIDATION_ERROR', 'Fecha y monto son requeridos');
@@ -257,14 +249,13 @@ router.post('/:id/pagos', async (req, res) => {
       return sendError(res, 'VALIDATION_ERROR', 'El monto debe ser un número mayor a 0');
     }
 
-    // Validate monto does not exceed remaining saldo
-    const { data: existingPagos } = await supabaseAdmin
-      .from('cartera_pagos')
-      .select('monto')
-      .eq('cartera_id', req.params.id)
-      .eq('user_id', req.user.id);
-    const totalAbonos = (existingPagos || []).reduce((s, p) => s + Number(p.monto), 0);
-    const saldoActual = Math.max(0, Number(cartera.valor_venta) - Number(cartera.cash) - totalAbonos);
+    const { saldo: saldoActual, error: saldoErr } = await getCarteraSaldoPendiente(
+      req.params.id,
+      req.user.id
+    );
+    if (saldoErr === 'NOT_FOUND') {
+      return sendError(res, 'NOT_FOUND', 'Registro de cartera no encontrado');
+    }
 
     if (montoNum > saldoActual) {
       return sendError(res, 'VALIDATION_ERROR', `El monto del abono excede el saldo pendiente ($${saldoActual.toFixed(2)})`);
@@ -293,16 +284,6 @@ router.post('/:id/pagos', async (req, res) => {
 // ─── PUT /cartera/:id/pagos/:pagoId ─ Editar un pago/abono ─────────────────
 router.put('/:id/pagos/:pagoId', async (req, res) => {
   try {
-    // Verify ownership of parent cartera
-    const { data: cartera } = await supabaseAdmin
-      .from('cartera')
-      .select('valor_venta, cash')
-      .eq('id', req.params.id)
-      .eq('user_id', req.user.id)
-      .single();
-    if (!cartera) return sendError(res, 'NOT_FOUND', 'Registro de cartera no encontrado');
-
-    // Verify pago exists and belongs to user
     const { data: existingPago } = await supabaseAdmin
       .from('cartera_pagos')
       .select('*')
@@ -311,6 +292,8 @@ router.put('/:id/pagos/:pagoId', async (req, res) => {
       .eq('user_id', req.user.id)
       .single();
     if (!existingPago) return sendError(res, 'NOT_FOUND', 'Pago no encontrado');
+
+    const linkedTransactionId = existingPago.transaction_id || null;
 
     const { fecha, monto, notas } = req.body;
     const updateData = {};
@@ -323,15 +306,14 @@ router.put('/:id/pagos/:pagoId', async (req, res) => {
         return sendError(res, 'VALIDATION_ERROR', 'El monto debe ser un número mayor a 0');
       }
 
-      // Validate new monto doesn't exceed saldo (excluding this pago's current monto)
-      const { data: otherPagos } = await supabaseAdmin
-        .from('cartera_pagos')
-        .select('monto')
-        .eq('cartera_id', req.params.id)
-        .eq('user_id', req.user.id)
-        .neq('id', req.params.pagoId);
-      const otherAbonos = (otherPagos || []).reduce((s, p) => s + Number(p.monto), 0);
-      const saldoDisponible = Number(cartera.valor_venta) - Number(cartera.cash) - otherAbonos;
+      const { saldo: saldoDisponible, error: saldoErr } = await getCarteraSaldoPendiente(
+        req.params.id,
+        req.user.id,
+        { excludePagoId: req.params.pagoId }
+      );
+      if (saldoErr === 'NOT_FOUND') {
+        return sendError(res, 'NOT_FOUND', 'Registro de cartera no encontrado');
+      }
 
       if (montoNum > saldoDisponible) {
         return sendError(res, 'VALIDATION_ERROR', `El monto excede el saldo disponible ($${saldoDisponible.toFixed(2)})`);
@@ -353,6 +335,30 @@ router.put('/:id/pagos/:pagoId', async (req, res) => {
       .single();
     if (error) throw error;
 
+    if (linkedTransactionId && (updateData.monto !== undefined || updateData.fecha !== undefined)) {
+      const txUpdate = {};
+      if (updateData.monto !== undefined) txUpdate.amount = updateData.monto;
+      if (updateData.fecha !== undefined) txUpdate.date = updateData.fecha;
+      const { error: txErr } = await supabaseAdmin
+        .from('transactions')
+        .update(txUpdate)
+        .eq('id', linkedTransactionId)
+        .eq('user_id', req.user.id);
+      if (txErr) {
+        console.error('Sync transaction from cartera pago:', txErr);
+        await supabaseAdmin
+          .from('cartera_pagos')
+          .update({
+            monto: existingPago.monto,
+            fecha: existingPago.fecha,
+            notas: existingPago.notas,
+          })
+          .eq('id', req.params.pagoId)
+          .eq('user_id', req.user.id);
+        return sendError(res, 'INTERNAL_ERROR', 'Error al sincronizar la transacción vinculada');
+      }
+    }
+
     success(res, { pago: data });
   } catch (error) {
     console.error('Error updating cartera pago:', error);
@@ -363,13 +369,35 @@ router.put('/:id/pagos/:pagoId', async (req, res) => {
 // ─── DELETE /cartera/:id/pagos/:pagoId ─ Eliminar un pago ──────────────────
 router.delete('/:id/pagos/:pagoId', async (req, res) => {
   try {
-    const { error } = await supabaseAdmin
+    const { data: pagoRow } = await supabaseAdmin
       .from('cartera_pagos')
-      .delete()
+      .select('id, transaction_id')
       .eq('id', req.params.pagoId)
       .eq('cartera_id', req.params.id)
-      .eq('user_id', req.user.id);
-    if (error) throw error;
+      .eq('user_id', req.user.id)
+      .single();
+
+    if (!pagoRow) {
+      return sendError(res, 'NOT_FOUND', 'Pago no encontrado');
+    }
+
+    if (pagoRow.transaction_id) {
+      const { error: txDelErr } = await supabaseAdmin
+        .from('transactions')
+        .delete()
+        .eq('id', pagoRow.transaction_id)
+        .eq('user_id', req.user.id);
+      if (txDelErr) throw txDelErr;
+    } else {
+      const { error } = await supabaseAdmin
+        .from('cartera_pagos')
+        .delete()
+        .eq('id', req.params.pagoId)
+        .eq('cartera_id', req.params.id)
+        .eq('user_id', req.user.id);
+      if (error) throw error;
+    }
+
     success(res, { message: 'Pago eliminado correctamente' });
   } catch (error) {
     console.error('Error deleting cartera pago:', error);
