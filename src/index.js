@@ -16,6 +16,7 @@ import notificationsRoutes from './routes/notifications.js';
 import budgetRoutes from './routes/budget.js';
 import carteraRoutes from './routes/cartera.js';
 import documentsRoutes from './routes/documents.js';
+import accountsRoutes from './routes/accounts.js';
 
 const app = express();
 
@@ -83,6 +84,7 @@ app.use('/api/subcategories', subcategoriesRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/budget', budgetRoutes);
 app.use('/api/cartera', carteraRoutes);
+app.use('/api/accounts', accountsRoutes);
 app.use('/api/transactions', documentsRoutes);
 app.use('/api/documents', documentsRoutes);
 

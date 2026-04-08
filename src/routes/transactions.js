@@ -5,6 +5,7 @@ import { authenticate } from '../middlewares/auth.js';
 import { requireSubscriptionOrDev } from '../middlewares/subscription.js';
 import { validateBody, validateUUID } from '../middlewares/validate.js';
 import { getCarteraSaldoPendiente } from '../utils/carteraSaldo.js';
+import { updateAccountBalance } from './accounts.js';
 
 const router = Router();
 
@@ -305,6 +306,14 @@ router.post(
         }
       }
 
+      const {
+        account_id, to_account_id, cuotas,
+      } = req.body;
+
+      const cuotasNum = type === 'expense' && account_id
+        ? Math.min(36, Math.max(1, parseInt(cuotas) || 1))
+        : 1;
+
       const insertData = {
         user_id: userId,
         type,
@@ -313,6 +322,10 @@ router.post(
         description: description || null,
         date,
       };
+
+      // Asociar cuenta si se proporcionó
+      if (account_id) insertData.account_id = account_id;
+      if (to_account_id && type === 'transfer') insertData.to_account_id = to_account_id;
 
       // Campos de ingreso
       if (type === 'income') {
@@ -338,15 +351,108 @@ router.post(
         if (destination_account !== undefined) insertData.destination_account = destination_account || null;
       }
 
+      // ── CUOTAS: crear N transacciones mensuales ──────────────────────────────
+      if (type === 'expense' && cuotasNum > 1 && account_id) {
+        // Verificar si la cuenta es tarjeta de crédito
+        const { data: acct } = await supabaseAdmin
+          .from('accounts')
+          .select('type')
+          .eq('id', account_id)
+          .single();
+
+        if (acct?.type === 'credit_card') {
+          const monthlyBase = parseFloat((amountNum / cuotasNum).toFixed(2));
+          const remainder = parseFloat((amountNum - monthlyBase * (cuotasNum - 1)).toFixed(2));
+
+          // Insertar primera cuota
+          const firstData = {
+            ...insertData,
+            amount: monthlyBase,
+            cuotas: cuotasNum,
+            cuota_numero: 1,
+            cuota_parent_id: null,
+          };
+
+          const { data: firstCuota, error: firstErr } = await supabaseAdmin
+            .from('transactions')
+            .insert(firstData)
+            .select()
+            .single();
+
+          if (firstErr) {
+            console.error('Create cuota 1 error:', firstErr);
+            return sendError(res, 'INTERNAL_ERROR', 'Error al crear la primera cuota');
+          }
+
+          // Insertar cuotas 2..N
+          const remainingRows = [];
+          for (let i = 1; i < cuotasNum; i++) {
+            const cuotaDate = new Date(date);
+            cuotaDate.setMonth(cuotaDate.getMonth() + i);
+            remainingRows.push({
+              ...insertData,
+              amount: i === cuotasNum - 1 ? remainder : monthlyBase,
+              date: cuotaDate.toISOString().split('T')[0],
+              cuotas: cuotasNum,
+              cuota_numero: i + 1,
+              cuota_parent_id: firstCuota.id,
+            });
+          }
+
+          if (remainingRows.length > 0) {
+            const { error: restErr } = await supabaseAdmin
+              .from('transactions')
+              .insert(remainingRows);
+            if (restErr) {
+              console.error('Create remaining cuotas error:', restErr);
+              // Rollback primera cuota
+              await supabaseAdmin.from('transactions').delete().eq('id', firstCuota.id);
+              return sendError(res, 'INTERNAL_ERROR', 'Error al crear cuotas');
+            }
+          }
+
+          // Actualizar balance de TC una sola vez con el total
+          await updateAccountBalance(supabaseAdmin, account_id, amountNum, 'subtract');
+
+          return success(res, {
+            transaction: firstCuota,
+            cuotas_created: cuotasNum,
+            monthly_amount: monthlyBase,
+          }, 201);
+        }
+      }
+      // ────────────────────────────────────────────────────────────────────────
+
       const { data, error } = await supabaseAdmin
         .from('transactions')
-        .insert(insertData)
+        .insert({ ...insertData, cuotas: 1, cuota_numero: 1 })
         .select()
         .single();
 
       if (error) {
         console.error('Create transaction error:', error);
         return sendError(res, 'INTERNAL_ERROR', 'Error al crear transacción');
+      }
+
+      // Actualizar balances de cuentas
+      if (data.account_id) {
+        if (type === 'transfer') {
+          await updateAccountBalance(supabaseAdmin, data.account_id, amountNum, 'subtract');
+          if (data.to_account_id) {
+            // Si el destino es tarjeta de crédito, restar (pagar deuda) en vez de sumar
+            const { data: toAcct } = await supabaseAdmin
+              .from('accounts')
+              .select('type')
+              .eq('id', data.to_account_id)
+              .single();
+            const op = toAcct?.type === 'credit_card' ? 'subtract' : 'add';
+            await updateAccountBalance(supabaseAdmin, data.to_account_id, amountNum, op);
+          }
+        } else if (type === 'income') {
+          await updateAccountBalance(supabaseAdmin, data.account_id, amountNum, 'add');
+        } else if (type === 'expense') {
+          await updateAccountBalance(supabaseAdmin, data.account_id, amountNum, 'subtract');
+        }
       }
 
       let cartera_pago = null;
@@ -545,14 +651,74 @@ router.delete('/:id', validateUUID('id'), async (req, res) => {
 
     const { data, error } = await supabaseAdmin
       .from('transactions')
-      .delete()
+      .select('*')
       .eq('id', id)
       .eq('user_id', userId)
-      .select()
       .single();
 
     if (error || !data) {
       return sendError(res, 'NOT_FOUND', 'Transacción no encontrada');
+    }
+
+    // Si es una transacción con cuotas, eliminar todas las del grupo
+    const isCuotaGroup = data.cuotas > 1;
+    if (isCuotaGroup) {
+      const parentId = data.cuota_parent_id || data.id; // si es la cuota 1, es ella misma
+
+      // Obtener todas las cuotas del grupo para sumar el total y revertir balance
+      const { data: allCuotas } = await supabaseAdmin
+        .from('transactions')
+        .select('id, amount, account_id')
+        .or(`id.eq.${parentId},cuota_parent_id.eq.${parentId}`)
+        .eq('user_id', userId);
+
+      const totalAmount = (allCuotas || []).reduce((sum, c) => sum + parseFloat(c.amount), 0);
+      const accountId = (allCuotas?.[0])?.account_id;
+
+      // Eliminar todas las cuotas del grupo
+      await supabaseAdmin
+        .from('transactions')
+        .delete()
+        .or(`id.eq.${parentId},cuota_parent_id.eq.${parentId}`)
+        .eq('user_id', userId);
+
+      // Revertir balance total una sola vez
+      if (accountId && data.type === 'expense') {
+        await updateAccountBalance(supabaseAdmin, accountId, parseFloat(totalAmount.toFixed(2)), 'add');
+      }
+
+      return success(res, {
+        message: `${allCuotas?.length || 1} cuotas eliminadas`,
+        cuotas_deleted: allCuotas?.length || 1,
+      });
+    }
+
+    // Transacción normal (sin cuotas)
+    await supabaseAdmin
+      .from('transactions')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    // Revertir balance de cuentas
+    if (data.account_id) {
+      if (data.type === 'transfer') {
+        await updateAccountBalance(supabaseAdmin, data.account_id, parseFloat(data.amount), 'add');
+        if (data.to_account_id) {
+          // Si el destino era TC, la creación restó (pagó deuda), así que revertir = sumar
+          const { data: toAcct } = await supabaseAdmin
+            .from('accounts')
+            .select('type')
+            .eq('id', data.to_account_id)
+            .single();
+          const op = toAcct?.type === 'credit_card' ? 'add' : 'subtract';
+          await updateAccountBalance(supabaseAdmin, data.to_account_id, parseFloat(data.amount), op);
+        }
+      } else if (data.type === 'income') {
+        await updateAccountBalance(supabaseAdmin, data.account_id, parseFloat(data.amount), 'subtract');
+      } else if (data.type === 'expense') {
+        await updateAccountBalance(supabaseAdmin, data.account_id, parseFloat(data.amount), 'add');
+      }
     }
 
     return success(res, { message: 'Transacción eliminada', transaction: data });

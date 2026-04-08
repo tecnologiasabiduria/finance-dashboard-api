@@ -6,3 +6,6 @@ dist
 coverage
 migrations/README.md
 migrations/20260330_add_cartera_client_fields.sql
+migrations/20260401_accounts_system.sql
+.gitignore
+migrations/20260401_cuotas.sql
