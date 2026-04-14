@@ -17,6 +17,7 @@ import budgetRoutes from './routes/budget.js';
 import carteraRoutes from './routes/cartera.js';
 import documentsRoutes from './routes/documents.js';
 import accountsRoutes from './routes/accounts.js';
+import agentRoutes from './routes/agent.js';
 
 const app = express();
 
@@ -87,6 +88,7 @@ app.use('/api/cartera', carteraRoutes);
 app.use('/api/accounts', accountsRoutes);
 app.use('/api/transactions', documentsRoutes);
 app.use('/api/documents', documentsRoutes);
+app.use('/api/agent', agentRoutes);
 
 // =============================================================================
 // MANEJO DE ERRORES
