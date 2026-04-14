@@ -164,7 +164,7 @@ router.get('/n8n/users-due', async (req, res) => {
     const userIds = configs.map((c) => c.user_id);
     const { data: profiles, error: profilesError } = await supabaseAdmin
       .from('profiles')
-      .select('id, email, name')
+      .select('id, email, full_name')
       .in('id', userIds);
 
     if (profilesError) throw profilesError;
@@ -177,7 +177,7 @@ router.get('/n8n/users-due', async (req, res) => {
     const result = configs.map((c) => ({
       user_id: c.user_id,
       email: profileMap[c.user_id]?.email || '',
-      name: profileMap[c.user_id]?.name || '',
+      name: profileMap[c.user_id]?.full_name || '',
       shared_data: c.shared_data,
     }));
 
