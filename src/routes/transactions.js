@@ -14,6 +14,11 @@ function isUuid(value) {
   return typeof value === 'string' && UUID_RE.test(value);
 }
 
+const VALID_PAYMENT_METHODS = ['transferencia', 'efectivo', 'tarjeta_debito', 'tarjeta_credito'];
+function isValidPaymentMethod(value) {
+  return value === null || value === undefined || value === '' || VALID_PAYMENT_METHODS.includes(value);
+}
+
 // Todas las rutas requieren autenticación y suscripción
 router.use(authenticate);
 router.use(requireSubscriptionOrDev);
@@ -159,7 +164,17 @@ router.post('/import', async (req, res) => {
       if (type === 'expense') {
         if (t.provider_document) row.provider_document = t.provider_document;
         if (t.provider_name) row.provider_name = t.provider_name;
-        if (t.payment_method) row.payment_method = t.payment_method;
+      }
+
+      // Método de pago aplica a income/expense
+      if (type !== 'transfer' && t.payment_method) {
+        if (!VALID_PAYMENT_METHODS.includes(t.payment_method)) {
+          errors.push({ row: i + 1, message: `Método de pago inválido: ${t.payment_method}` });
+          continue;
+        }
+        row.payment_method = t.payment_method;
+      } else if (type === 'transfer') {
+        row.payment_method = 'transferencia';
       }
 
       // Campos de transferencia
@@ -284,6 +299,14 @@ router.post(
         cartera_id,
       } = req.body;
 
+      if (!isValidPaymentMethod(payment_method)) {
+        return sendError(
+          res,
+          'VALIDATION_ERROR',
+          `payment_method debe ser uno de: ${VALID_PAYMENT_METHODS.join(', ')}`
+        );
+      }
+
       const amountNum = parseFloat(amount);
       const carteraIdTrimmed = typeof cartera_id === 'string' ? cartera_id.trim() : '';
       if (carteraIdTrimmed) {
@@ -342,7 +365,13 @@ router.post(
       if (type === 'expense') {
         if (provider_document !== undefined) insertData.provider_document = provider_document || null;
         if (provider_name !== undefined) insertData.provider_name = provider_name || null;
-        if (payment_method !== undefined) insertData.payment_method = payment_method || null;
+      }
+
+      // Método de pago: income/expense lo reciben del usuario; transfer siempre es transferencia
+      if (type === 'transfer') {
+        insertData.payment_method = 'transferencia';
+      } else if (payment_method !== undefined) {
+        insertData.payment_method = payment_method || null;
       }
 
       // Campos de transferencia
@@ -503,7 +532,16 @@ router.put(
         client_address, client_email, client_phone, invoice_status,
         provider_document, provider_name, payment_method,
         source_account, destination_account,
+        account_id, to_account_id,
       } = req.body;
+
+      if (!isValidPaymentMethod(payment_method)) {
+        return sendError(
+          res,
+          'VALIDATION_ERROR',
+          `payment_method debe ser uno de: ${VALID_PAYMENT_METHODS.join(', ')}`
+        );
+      }
 
       const { data: existing, error: existingErr } = await supabaseAdmin
         .from('transactions')
@@ -543,11 +581,22 @@ router.put(
       // Campos de gasto
       if (provider_document !== undefined) updateData.provider_document = provider_document || null;
       if (provider_name !== undefined) updateData.provider_name = provider_name || null;
-      if (payment_method !== undefined) updateData.payment_method = payment_method || null;
+
+      // Método de pago
+      const effectiveType = updateData.type !== undefined ? updateData.type : existing.type;
+      if (effectiveType === 'transfer') {
+        updateData.payment_method = 'transferencia';
+      } else if (payment_method !== undefined) {
+        updateData.payment_method = payment_method || null;
+      }
 
       // Campos de transferencia
       if (source_account !== undefined) updateData.source_account = source_account || null;
       if (destination_account !== undefined) updateData.destination_account = destination_account || null;
+
+      // Cuenta asociada
+      if (account_id !== undefined) updateData.account_id = account_id || null;
+      if (to_account_id !== undefined) updateData.to_account_id = to_account_id || null;
 
       const nextType = updateData.type !== undefined ? updateData.type : existing.type;
       if (linkedPago && nextType !== 'income') {

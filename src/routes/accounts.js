@@ -477,7 +477,7 @@ router.put('/:id', validateUUID('id'), async (req, res) => {
     const userId = req.user.id;
     const { id } = req.params;
     const {
-      name, color, icon, currency, is_active,
+      name, color, icon, currency, is_active, is_default,
       credit_limit, cut_off_day, payment_due_day, interest_rate, minimum_payment,
     } = req.body;
 
@@ -516,6 +516,22 @@ router.put('/:id', validateUUID('id'), async (req, res) => {
     if (icon !== undefined) updateData.icon = icon;
     if (currency !== undefined) updateData.currency = currency;
     if (is_active !== undefined) updateData.is_active = is_active;
+    if (is_default !== undefined) updateData.is_default = !!is_default;
+
+    // Si se marca como default, desmarcar las demás cuentas del usuario
+    if (is_default === true) {
+      const { error: unsetErr } = await supabaseAdmin
+        .from('accounts')
+        .update({ is_default: false, updated_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .neq('id', id)
+        .is('deleted_at', null);
+
+      if (unsetErr) {
+        console.error('Unset other defaults error:', unsetErr);
+        return sendError(res, 'INTERNAL_ERROR', 'Error al actualizar cuenta por defecto');
+      }
+    }
 
     const { data: updated, error: updateErr } = await supabaseAdmin
       .from('accounts')
